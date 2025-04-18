@@ -1,57 +1,62 @@
 const express = require('express');
 const fetch = require('node-fetch');
-const xml2js = require('xml2js');
+const { parseString } = require('xml2js');
+const AbortController = require('abort-controller');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get('/', async (req, res) => {
   const cepDestino = req.query.cep;
-  const cepOrigem = '08674090';
+  const cepOrigem = '08674090'; // CEP fixo da loja
 
-  // Validação do CEP de destino
   if (!cepDestino) {
     return res.status(400).json({ error: 'CEP de destino não informado' });
   }
 
-  const url = `https://ws.correios.com.br/calculador/CalcPrecoPrazo.aspx?nCdEmpresa=&sDsSenha=&nCdServico=04510&nVlPeso=1&nCdFormato=1&sCepOrigem=${cepOrigem}&sCepDestino=${cepDestino}&nVlComprimento=20&nVlAltura=5&nVlLargura=15&nVlDiametro=0&nVlValorDeclarado=0&sCdAvisoRecebimento=n&StrRetorno=xml`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+  const url = `https://ws.correios.com.br/calculador/CalcPrecoPrazo.aspx?nCdEmpresa=&sDsSenha=&nCdServico=04510&sCepOrigem=${cepOrigem}&sCepDestino=${cepDestino}&nVlPeso=1&nCdFormato=1&nVlComprimento=20&nVlAltura=5&nVlLargura=15&nVlDiametro=0&sCdMaoPropria=n&nVlValorDeclarado=0&sCdAvisoRecebimento=n&StrRetorno=xml`;
 
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
     const xml = await response.text();
 
-    xml2js.parseString(xml, (err, result) => {
+    parseString(xml, (err, result) => {
       if (err) {
-        return res.status(500).json({ error: 'Erro ao processar resposta dos Correios', detalhe: err.message });
+        console.error('[XML ERROR]', err);
+        return res.status(500).json({ error: 'Erro ao interpretar resposta XML dos Correios' });
       }
 
       const servico = result?.Servicos?.cServico?.[0];
 
-      if (!servico) {
-        return res.status(500).json({ error: 'Erro ao interpretar a resposta dos Correios' });
-      }
-
-      const codigoErro = servico.Erro?.[0];
-      const msgErro = servico.MsgErro?.[0];
-      const valor = servico.Valor?.[0];
-
-      if (codigoErro !== '0') {
+      if (!servico || servico.Erro[0] !== '0') {
         return res.status(400).json({
-          error: 'Erro no cálculo de frete',
-          codigo: codigoErro,
-          mensagem: msgErro || 'Erro desconhecido'
+          error: 'Erro retornado pelos Correios',
+          codigo: servico?.Erro?.[0],
+          mensagem: servico?.MsgErro?.[0] || 'Erro desconhecido'
         });
       }
 
-      if (!valor) {
-        return res.status(500).json({ error: 'Valor do frete não retornado' });
-      }
-
-      res.json({ valor });
+      res.json({
+        valor: servico.Valor[0],
+        prazo_entrega: servico.PrazoEntrega[0] + ' dias úteis',
+        valor_sem_adicionais: servico.ValorSemAdicionais[0]
+      });
     });
 
   } catch (error) {
-    res.status(500).json({ error: 'Erro interno ao consultar o frete', detalhe: error.message });
+    clearTimeout(timeout);
+
+    if (error.name === 'AbortError') {
+      return res.status(504).json({ error: 'Tempo limite excedido na consulta aos Correios' });
+    }
+
+    console.error('[FATAL ERROR]', error.message);
+    return res.status(500).json({ error: 'Erro interno ao consultar o frete', detalhe: error.message });
   }
 });
 
