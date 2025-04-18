@@ -3,7 +3,7 @@ const fetch = require("node-fetch");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-const cepOrigem = "08674090"; // CEP da loja (fixo)
+const cepOrigem = "08674090"; // CEP da loja
 
 app.get("/", async (req, res) => {
   const cepDestino = req.query.cep;
@@ -15,7 +15,9 @@ app.get("/", async (req, res) => {
   const url = `https://ws.correios.com.br/calculador/CalcPrecoPrazo.aspx?nCdEmpresa=&sDsSenha=&nCdServico=04510&sCepOrigem=${cepOrigem}&sCepDestino=${cepDestino}&nVlPeso=1&nCdFormato=1&nVlComprimento=20&nVlAltura=5&nVlLargura=15&nVlDiametro=0&sCdMaoPropria=n&nVlValorDeclarado=0&sCdAvisoRecebimento=n&StrRetorno=xml`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000); // Limite de 5 segundos
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, 5000); // 5 segundos
 
   try {
     const response = await fetch(url, {
@@ -27,13 +29,12 @@ app.get("/", async (req, res) => {
       }
     });
 
-    clearTimeout(timeout);
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       return res.status(502).json({
         error: "Erro na resposta da API dos Correios",
         status: response.status,
-        statusText: response.statusText,
         url,
         origem: cepOrigem,
         destino: cepDestino
@@ -52,18 +53,18 @@ app.get("/", async (req, res) => {
       });
     }
 
-    res.type("application/xml").send(xml);
+    return res.type("application/xml").send(xml);
 
-  } catch (error) {
-    clearTimeout(timeout);
+  } catch (err) {
+    clearTimeout(timeoutId);
 
     let motivo = "Erro inesperado";
-    if (error.name === "AbortError") motivo = "Timeout de 5 segundos excedido";
-    else if (error.code === "ENOTFOUND") motivo = "Endereço da API não encontrado";
-    else motivo = error.message;
+    if (err.name === "AbortError") motivo = "A API dos Correios não respondeu em 5 segundos";
+    else if (err.code === "ENOTFOUND") motivo = "Endereço da API não encontrado";
+    else motivo = err.message;
 
-    res.status(500).json({
-      error: "Erro ao consultar o frete",
+    return res.status(500).json({
+      error: "Erro interno ao consultar o frete",
       motivo,
       url,
       origem: cepOrigem,
@@ -73,5 +74,5 @@ app.get("/", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
