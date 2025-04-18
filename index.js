@@ -3,7 +3,7 @@ const fetch = require("node-fetch");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-const cepOrigem = "08674090"; // CEP fixo da loja
+const cepOrigem = "08674090"; // CEP da loja (fixo)
 
 app.get("/", async (req, res) => {
   const cepDestino = req.query.cep;
@@ -15,23 +15,25 @@ app.get("/", async (req, res) => {
   const url = `https://ws.correios.com.br/calculador/CalcPrecoPrazo.aspx?nCdEmpresa=&sDsSenha=&nCdServico=04510&sCepOrigem=${cepOrigem}&sCepDestino=${cepDestino}&nVlPeso=1&nCdFormato=1&nVlComprimento=20&nVlAltura=5&nVlLargura=15&nVlDiametro=0&sCdMaoPropria=n&nVlValorDeclarado=0&sCdAvisoRecebimento=n&StrRetorno=xml`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000); // 5 segundos
+  const timeout = setTimeout(() => controller.abort(), 5000); // Limite de 5 segundos
 
   try {
     const response = await fetch(url, {
       method: "GET",
       signal: controller.signal,
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "Mozilla/5.0",
+        "Content-Type": "application/x-www-form-urlencoded"
       }
     });
+
     clearTimeout(timeout);
 
     if (!response.ok) {
       return res.status(502).json({
         error: "Erro na resposta da API dos Correios",
         status: response.status,
+        statusText: response.statusText,
         url,
         origem: cepOrigem,
         destino: cepDestino
@@ -39,20 +41,27 @@ app.get("/", async (req, res) => {
     }
 
     const xml = await response.text();
+
+    if (!xml || xml.trim() === "") {
+      return res.status(504).json({
+        error: "Sem retorno da API dos Correios",
+        motivo: "Resposta vazia",
+        url,
+        origem: cepOrigem,
+        destino: cepDestino
+      });
+    }
+
     res.type("text/xml").send(xml);
 
   } catch (error) {
-    let motivo = "Erro desconhecido";
-    if (error.name === "AbortError") {
-      motivo = "Timeout na API dos Correios";
-    } else if (error.code === "ENOTFOUND") {
-      motivo = "Endereço da API não encontrado";
-    } else {
-      motivo = error.message;
-    }
+    let motivo = "Erro inesperado";
+    if (error.name === "AbortError") motivo = "Timeout de 5 segundos excedido";
+    else if (error.code === "ENOTFOUND") motivo = "Endereço da API não encontrado";
+    else motivo = error.message;
 
     res.status(500).json({
-      error: "Erro interno ao consultar o frete",
+      error: "Erro ao consultar o frete",
       motivo,
       url,
       origem: cepOrigem,
