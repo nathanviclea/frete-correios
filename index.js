@@ -28,7 +28,7 @@ app.get("/", async (req, res) => {
   });
 
   try {
-    const response = await fetch("https://ws.correios.com.br/calculador/CalcPrecoPrazo.aspx?" + params.toString());
+    const response = await fetch(`http://ws.correios.com.br/calculador/CalcPrecoPrazo.aspx?${params}`);
     const xml = await response.text();
 
     const valorMatch = xml.match(/<Valor>(.*?)<\/Valor>/);
