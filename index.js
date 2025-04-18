@@ -52,9 +52,11 @@ app.get("/", async (req, res) => {
       });
     }
 
-    res.type("text/xml").send(xml);
+    res.type("application/xml").send(xml);
 
   } catch (error) {
+    clearTimeout(timeout);
+
     let motivo = "Erro inesperado";
     if (error.name === "AbortError") motivo = "Timeout de 5 segundos excedido";
     else if (error.code === "ENOTFOUND") motivo = "Endereço da API não encontrado";
