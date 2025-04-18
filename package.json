@@ -2,9 +2,9 @@
   "name": "frete-correios",
   "version": "1.0.0",
   "description": "API para cálculo de frete usando os Correios",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
