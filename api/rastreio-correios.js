@@ -1,79 +1,57 @@
 export default async function handler(req, res) {
-  // CORS
+  // CORS para poder chamar do Shopify
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
-    const code = (req.query.code || "").toString().trim().toUpperCase();
+    const code = String(req.query.code || "").trim().toUpperCase();
 
-    if (!/^[A-Z]{2}\d{9}BR$/.test(code)) {
+    // Aceita códigos tipo AB123456789BR (ou qualquer 2 letras + 9 dígitos + 2 letras)
+    if (!/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(code)) {
       return res.status(400).json({ ok: false, error: "Código inválido" });
     }
 
     const token = process.env.CORREIOS_API_TOKEN;
     if (!token) {
-      return res.status(500).json({ ok: false, error: "Token ausente no servidor" });
+      return res.status(500).json({ ok: false, error: "CORREIOS_API_TOKEN não configurado." });
     }
 
-    // 1) Endpoint OFICIAL (ajuste se seu contrato indicar outro base path)
-    const oficialUrl = `https://api.correios.com.br/srorastro/v1/objetos/${code}`;
+    // Endpoint de produção dos Correios (SRRO / Rastreamento)
+    // Caso seu contrato use outro caminho, me diga e eu ajusto.
+    const url = `https://api.correios.com.br/srro/rastreamento/v1/objetos/${encodeURIComponent(code)}`;
 
-    const r1 = await fetch(oficialUrl, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Accept": "application/json",
-        "User-Agent": "Surfinn-Rastreio/1.0" // identifique seu app, alguns backends validam
-      }
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
     });
 
-    if (r1.ok) {
-      const data = await r1.json().catch(() => null);
-      return res.status(200).json({ ok: true, fonte: "oficial", data });
-    }
+    const text = await r.text().catch(() => "");
 
-    // Coleta o texto de erro para depuração
-    const errTxt = await r1.text().catch(() => "");
-    if (r1.status === 403) {
-      return res.status(403).json({
+    // Tratamento de erros mais comuns
+    if (!r.ok) {
+      // 401/403 são quase sempre: token inválido / escopo / IP whitelist
+      const status = r.status;
+      let dica = undefined;
+      if (status === 401 || status === 403) {
+        dica = "Verifique: token do ambiente de PRODUÇÃO, escopo ‘rastreio’ e se existe whitelist de IP (inclua o IP da Vercel).";
+      }
+      return res.status(502).json({
         ok: false,
-        error: "Forbidden (Correios)",
-        hint: "Verifique escopo/permisoes do token, endpoint/ambiente EXATO do contrato e se há whitelist de IP.",
-        endpoint: oficialUrl,
-        detail: errTxt
+        error: "Erro Correios",
+        status,
+        detail: text,
+        hint: dica
       });
     }
 
-    // (Opcional) 2) Fallback público SEM token — use somente se for aceitável
-    // Descomente se quiser testar:
-    // const publicoUrl = `https://proxyapp.correios.com.br/v1/sro-rastro?objetos=${code}`;
-    // const r2 = await fetch(publicoUrl, { headers: { "Accept": "application/json" }});
-    // if (r2.ok) {
-    //   const data2 = await r2.json().catch(() => null);
-    //   return res.status(200).json({ ok: true, fonte: "publico", data: data2 });
-    // }
-    // const errTxt2 = await r2.text().catch(() => "");
-    // return res.status(502).json({ ok: false, error: "Falha no fallback", detail: errTxt2 });
+    // Se for JSON válido, retorna normal
+    let data = null;
+    try { data = JSON.parse(text); } catch { /* as vezes vem texto */ }
 
-    // Se chegou aqui, é erro no oficial e fallback desativado:
-    return res.status(r1.status || 500).json({
-      ok: false,
-      error: "Erro Correios (oficial)",
-      status: r1.status,
-      endpoint: oficialUrl,
-      detail: errTxt
-    });
+    return res.status(200).json({ ok: true, code, data: data ?? text });
 
   } catch (err) {
-    return res.status(500).json({
-      ok: false,
-      error: "Falha interna",
-      detail: err?.message || String(err)
-    });
+    return res.status(500).json({ ok: false, error: "Falha interna", detail: String(err?.message || err) });
   }
 }
